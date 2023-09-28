@@ -14,7 +14,6 @@ from rich.progress import (BarColumn, DownloadColumn, Progress, TextColumn,
 console = Console()
 policy = asyncio.WindowsSelectorEventLoopPolicy()
 asyncio.set_event_loop_policy(policy)
-semaphore = asyncio.Semaphore(2048)
 
 
 async def total(url: str, session: aiohttp.ClientSession, header: dict) -> int:
@@ -50,7 +49,7 @@ async def split(filesize: int, num_threads: int) -> list[tuple[int, int]]:
         parts.append((start, end))
     return parts
 
-async def main(url: str, retry_nums: int, coros: int) -> None:
+async def main(url: str, retry_nums: int, coros: int, semaphores: int) -> None:
     """_summary_
 
     Args:
@@ -61,6 +60,7 @@ async def main(url: str, retry_nums: int, coros: int) -> None:
     download_dir: str = os.path.join(os.path.dirname(main_dir), "Downloaded files\\")
     download_file: str = os.path.join(download_dir, os.path.normpath(os.path.basename(parse.urlparse(url).path)))
     user_agent: str = UserAgent().random
+    semaphore = asyncio.Semaphore(semaphores)
     f = open(download_file, "wb")
     @retry(tries=retry_nums)
     async def start_download(start: int, end: int, session: aiohttp.ClientSession) -> None:
@@ -110,9 +110,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="A downloader.")
     parser.add_argument('-U', '--url', type=str, required=True)
     parser.add_argument('--retry-nums', type=int, required=False, default=3)
-    parser.add_argument('-C', "--concurrent",type=int, required=False, default=multiprocessing.cpu_count()*2+2)
+    parser.add_argument('-C', "--concurrent-nums",type=int, required=False, default=multiprocessing.cpu_count()*2+2)
+    parser.add_argument('-S', "--semaphores",type=int, required=False, default=3)
     arg = parser.parse_args()
     start = time.perf_counter()
-    asyncio.run(main(arg.url, arg.retry_nums, arg.concurrent))
+    asyncio.run(main(arg.url, arg.retry_nums, arg.concurrent, arg.semaphores))
     end = time.perf_counter()
     print(end - start)
