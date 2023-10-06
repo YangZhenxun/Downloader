@@ -45,8 +45,9 @@ async def split(filesize: int, num_threads: int) -> list[tuple[int, int]]:
     parts: dict[tuple[int, int]] = []
     for i in range(num_threads):
         start: int = chunk_size * i
-        end: int = start + chunk_size - 1 if i < num_threads - 1 else filesize - 1
+        end: int = start + chunk_size - 1 if i < num_threads - 1 else filesize
         parts.append((start, end))
+    print(parts)
     return parts
 
 async def main(url: str, retry_nums: int, coros: int, semaphores: int) -> None:
@@ -73,12 +74,11 @@ async def main(url: str, retry_nums: int, coros: int, semaphores: int) -> None:
         """
         progress.start_task(task_id)
         f.seek(start)
-        _headers: dict[str, str] = {'User-Agent': user_agent, 'Range': f'{start}-{end}', 'Content-Type': 'application/octet-stream', "Accept-Encoding": "gzip, compress, deflate, br"}
+        _headers: dict = {'User-Agent': user_agent, 'Range': f'bytes={start}-{end}'}
         Timeout: aiohttp.ClientTimeout = aiohttp.ClientTimeout(total=100000**10)
         async with semaphore:
             async with session.get(url, headers=_headers, timeout=Timeout) as req:
-                assert req.status == 200
-                async for chunk in req.content.iter_chunked(1024):
+                async for chunk in req.content.iter_chunked((end-start)//10):
                         f.write(chunk)
                         progress.update(task_id, advance=len(chunk))
     with Progress(
@@ -95,15 +95,15 @@ async def main(url: str, retry_nums: int, coros: int, semaphores: int) -> None:
         task_id: TaskID = progress.add_task("Download file:", filename=os.path.split(download_file)[1], start=False)
         tasks: dict = []
         async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
-            _total = await asyncio.create_task(total(url, session, {'User-Agent': user_agent, "Accept-Encoding": "gzip, compress, deflate, br"}))
+            _total = await asyncio.create_task(total(url, session, {'User-Agent': user_agent}))
             progress.update(task_id, total=_total)
             parts = await asyncio.create_task(split(_total, coros))
             print(len(parts))
             for part in parts:
                 start, end = part
-                tasks.append(start_download(start, end, session))
+                tasks.append(asyncio.create_task(start_download(start, end, session)))
             tasks_a = await asyncio.gather(*tasks)
-        f.close()
+    f.close()
 
 
 if __name__ == '__main__':
@@ -114,6 +114,6 @@ if __name__ == '__main__':
     parser.add_argument('-S', "--semaphores",type=int, required=False, default=3)
     arg = parser.parse_args()
     start = time.perf_counter()
-    asyncio.run(main(arg.url, arg.retry_nums, arg.concurrent, arg.semaphores))
+    asyncio.run(main(arg.url, arg.retry_nums, arg.concurrent_nums, arg.semaphores))
     end = time.perf_counter()
     print(end - start)
