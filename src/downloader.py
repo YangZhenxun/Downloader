@@ -1,9 +1,15 @@
+from __future__ import annotations
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from _typeshed import FileDescriptorOrPath, OpenTextMode
+
 import argparse
 import os
 import aiohttp
 import asyncio
 import time
 import multiprocessing
+import aiofiles
 from aiopath import AsyncPath
 from retry import retry
 from fake_useragent import UserAgent
@@ -12,9 +18,8 @@ from rich.console import Console
 from rich.progress import (BarColumn, DownloadColumn, Progress, TextColumn,
                            TimeRemainingColumn, TransferSpeedColumn, TaskID)
 console = Console()
-
-# policy = asyncio.WindowsSelectorEventLoopPolicy()
-# asyncio.set_event_loop_policy(policy)
+policy = asyncio.WindowsSelectorEventLoopPolicy()
+asyncio.set_event_loop_policy(policy)
 
 
 async def total(url: str, session: aiohttp.ClientSession, header: dict) -> int:
@@ -53,6 +58,11 @@ async def split(filesize: int, num_threads: int) -> list[tuple[int, int]]:
     return parts
 
 
+async def write(write_things: bytes | str, filename: FileDescriptorOrPath, mode: OpenTextMode):
+    async with aiofiles.open(file=filename, mode=mode) as f:
+        await f.write(str(write_things))
+
+
 async def main(url: str, retry_nums: int, coros: int, semaphores: int) -> None:
     """Main function for running.
 
@@ -62,14 +72,14 @@ async def main(url: str, retry_nums: int, coros: int, semaphores: int) -> None:
         coros (int): __des__
         semaphores(int):__des__
     """
-    main_dir: AsyncPath = (await AsyncPath(__file__).resolve()).parents[0]
+    main_dir: AsyncPath = (await AsyncPath(__file__).resolve()).parents[1]
     download_dir: AsyncPath = await AsyncPath(main_dir / "Downloaded files\\").resolve()
     download_file: AsyncPath = download_dir / os.path.normpath(os.path.basename(parse.urlparse(url).path))
     user_agent: str = UserAgent().random
 
     @retry(tries=retry_nums)
-    async def start_download(_start: int, _end: int, _session: aiohttp.ClientSession) -> None:
-        async with download_file.open("wb+") as f:
+    async def start_download(_start: int, _end: int, _session: aiohttp.ClientSession):
+        async with aiofiles.open(file=download_file, mode="wb+") as f:
             """_summary_
             Args:
                 start (int): _description_
@@ -79,17 +89,21 @@ async def main(url: str, retry_nums: int, coros: int, semaphores: int) -> None:
             progress.start_task(task_id)
             await f.seek(_start, 0)
             _headers: dict = {'User-Agent': user_agent, 'Range': f'bytes={_start}-{_end}'}
-            chunks: list = []
-            some_chunk: bytes = b""
+            #chunks: list = []
+            #some_chunk: bytes = b""
             timeout: aiohttp.ClientTimeout = aiohttp.ClientTimeout(total=100000**10)
             async with _session.get(url, headers=_headers, timeout=timeout) as req:
                 async for chunk in req.content.iter_chunked((_end-_start)//10):
-                    chunks.append(chunk)
+                    #chunks.append(chunk)
+                    await f.write(chunk)
                     progress.update(task_id, advance=len(chunk))
+            """
             for chunk in chunks:
                 some_chunk += chunk
-                await f.write(some_chunk)
-        del chunks
+                hell = asyncio.create_task(write(some_chunk, download_file, "wb+"))
+                return hell
+            del chunks
+            """
     with Progress(
         TextColumn("[bold blue]{task.fields[filename]}", justify="right"),
         BarColumn(bar_width=None),
@@ -112,6 +126,7 @@ async def main(url: str, retry_nums: int, coros: int, semaphores: int) -> None:
                 __start, __end = part
                 tasks.append(asyncio.create_task(start_download(__start, __end, session)))
             _done, _nd = await asyncio.wait(tasks)
+            #await asyncio.wait(_done)
 
 
 if __name__ == '__main__':
